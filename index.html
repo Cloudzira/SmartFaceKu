@@ -336,7 +336,7 @@ const CFG = {
   SAMPLES: 4,
   MIN_FACE: 0.16,    // lebar wajah minimal (rasio lebar video)
   DESC_EVERY: 4,     // verifikasi ulang wajah tiap N frame
-  TRACK_TTL: 900     // ms track dipertahankan saat wajah hilang
+  TRACK_TTL: 2500    // ms track dipertahankan saat inferensi kamera lambat
 };
 
 const $ = id => document.getElementById(id);
@@ -584,7 +584,11 @@ $('days-box').addEventListener('change', e => {
 });
 ['set-live', 'set-voice'].forEach(id => $(id).addEventListener('change', () => { S.liveness = $('set-live').checked; S.voice = $('set-voice').checked; saveS(); toast('Pengaturan disimpan'); }));
 
-function applyRange() { const r = RANGES[S.range]; detOpts = new fa.TinyFaceDetectorOptions({ inputSize: r.size, scoreThreshold: 0.4 }); CFG.MIN_FACE = r.min; }
+function applyRange() {
+  const r = RANGES[S.range], mobile = matchMedia('(pointer: coarse)').matches;
+  detOpts = new fa.TinyFaceDetectorOptions({ inputSize: mobile ? Math.min(r.size, 256) : r.size, scoreThreshold: mobile ? 0.3 : 0.4 });
+  CFG.MIN_FACE = r.min;
+}
 $('set-range').addEventListener('change', async () => { S.range = $('set-range').value; saveS(); applyRange(); tracks = []; await startCamera(); toast('Jarak deteksi diubah'); });
 
 /* ---------- Database wajah ---------- */
@@ -711,8 +715,10 @@ function blinkStep(t, e) {
   else if (t.bs === 1 && t.ratio > 0.93) { t.bs = 0; t.blinked = true; } // mata membuka lagi = 1 kedip
 }
 function updateTrack(t, d, W) {
-  const p = d.landmarks.positions;
-  if (t.box.width >= W * CFG.MIN_LIVE) blinkStep(t, (ear(p, 36) + ear(p, 42)) / 2); // wajah terlalu kecil: mata tak terbaca andal
+  if (d.landmarks && t.box.width >= W * CFG.MIN_LIVE) {
+    const p = d.landmarks.positions;
+    blinkStep(t, (ear(p, 36) + ear(p, 42)) / 2);
+  }
   t.far = t.box.width < W * 0.1; t.small = t.box.width < W * CFG.MIN_FACE;
   if (d.descriptor && !t.small) {
     const m = matchFace(avgDesc(t, d.descriptor));
@@ -729,11 +735,14 @@ function updateTrack(t, d, W) {
 async function processFrame() {
   const W = video.videoWidth, H = video.videoHeight; if (!W) return;
   fno++;
-  const waiting = S.liveness && tracks.some(t => !t.done && t.hits >= cn(t) && !t.blinked);
-  const need = !tracks.length || tracks.some(t => !t.done && t.hits < cn(t));
-  const want = db.length > 0 && (need || frame++ % (waiting ? 15 : CFG.DESC_EVERY) === 0); // menunggu kedip: nyaris tanpa descriptor agar FPS tinggi
-  const task = fa.detectAllFaces(video, detOpts).withFaceLandmarks();
-  const res = want ? await task.withFaceDescriptors() : await task;
+  const waitingBlink = S.liveness && tracks.some(t => !t.done && t.hits >= cn(t) && !t.blinked);
+  const confirming = tracks.some(t => !t.done && t.hits > 0 && t.hits < cn(t));
+  const descriptorEvery = matchMedia('(pointer: coarse)').matches ? 2 : CFG.DESC_EVERY;
+  const wantDescriptors = db.length > 0 && (confirming || fno % descriptorEvery === 0);
+  const wantLandmarks = wantDescriptors || waitingBlink;
+  let task = fa.detectAllFaces(video, detOpts);
+  if (wantLandmarks) task = task.withFaceLandmarks();
+  const res = wantDescriptors ? await task.withFaceDescriptors() : await task;
   const now = performance.now(), used = new Set();
   for (const d of res) {
     const b = d.detection.box; let best = null, bi = 0.3;
@@ -895,7 +904,8 @@ let oriT = null;
 matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('change', () => { clearTimeout(oriT); oriT = setTimeout(() => { if (ready) { tracks = []; startCamera(); } }, 500); });
 function cameraConstraints(facing, exact = false) {
   const r = RANGES[S.range];
-  return { video: { width: { ideal: r.w }, height: { ideal: r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
+  const mobile = matchMedia('(pointer: coarse)').matches;
+  return { video: { width: { ideal: mobile ? Math.min(r.w, 640) : r.w }, height: { ideal: mobile ? Math.min(r.h, 480) : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
 }
 async function attachCameraStream(stream) {
   video.srcObject = stream; videoEnroll.srcObject = stream;
