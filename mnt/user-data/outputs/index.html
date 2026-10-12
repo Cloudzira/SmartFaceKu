@@ -33,7 +33,7 @@ main{flex:1;display:grid;grid-template-columns:1fr 360px;gap:1rem;padding:1rem;m
 main.wide{grid-template-columns:1fr}
 @media(max-width:1000px){main{grid-template-columns:1fr}}
 .vbox{position:relative;background:#000;border-radius:1rem;overflow:hidden;width:100%;aspect-ratio:4/3;max-height:72vh;margin:0 auto;border:1px solid var(--line)}
-.vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
 .vbox video.rear{transform:none}
 .vbox canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .camera-controls{position:absolute;top:.6rem;right:.6rem;z-index:5;display:flex;gap:.4rem}
@@ -611,11 +611,11 @@ async function processFrame() {
 let vw = 0, vh = 0, lastMsg = '';
 function renderLoop() { if (vw && tab === 'attendance') draw(vw, vh, performance.now()); requestAnimationFrame(renderLoop); }
 function draw(W, H, now) {
-  // canvas mengikuti ukuran kotak video (object-fit: cover) agar kotak wajah selalu pas di layout apa pun
+  // canvas mengikuti ukuran gambar video tanpa crop agar kotak wajah tetap sejajar
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cw, ch);
-  const sc = Math.max(cw / W, ch / H); ctx.setTransform(sc, 0, 0, sc, (cw - W * sc) / 2, (ch - H * sc) / 2);
+  const sc = Math.min(cw / W, ch / H); ctx.setTransform(sc, 0, 0, sc, (cw - W * sc) / 2, (ch - H * sc) / 2);
   const k = 1 / sc; // 1 px layar dalam satuan video
   const msgs = [], dayOn = dayCfg().on;
   for (const t of tracks) {
@@ -636,7 +636,7 @@ function draw(W, H, now) {
     else if (t.hits > 0) { label = msg = 'Memverifikasi...'; }
     else if (t.unk >= 2) { color = '#ef4444'; label = msg = 'Belum terdaftar'; }
     msgs.push(msg);
-    const { x, y, width: w, height: h } = d, mx = W - (x + w), cl = Math.min(w, h) * 0.22;
+    const { x, y, width: w, height: h } = d, mx = cameraFacing === 'user' ? W - (x + w) : x, cl = Math.min(w, h) * 0.22;
     ctx.strokeStyle = color; ctx.lineWidth = 3 * k; ctx.lineCap = 'round'; ctx.shadowColor = color; ctx.shadowBlur = 10; ctx.beginPath();
     [[mx, y, 1, 1], [mx + w, y, -1, 1], [mx, y + h, 1, -1], [mx + w, y + h, -1, -1]].forEach(([cx, cy, sx, sy]) => { ctx.moveTo(cx + sx * cl, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * cl); });
     ctx.stroke(); ctx.shadowBlur = 0;
