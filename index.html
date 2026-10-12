@@ -751,7 +751,11 @@ async function processFrame() {
 }
 
 let vw = 0, vh = 0, lastMsg = '';
-function renderLoop() { if (vw && tab === 'attendance') draw(vw, vh, performance.now()); requestAnimationFrame(renderLoop); }
+function renderLoop() {
+  const width = video.videoWidth || vw, height = video.videoHeight || vh;
+  if (width && height && tab === 'attendance') draw(width, height, performance.now());
+  requestAnimationFrame(renderLoop);
+}
 function draw(W, H, now) {
   // canvas mengikuti ukuran gambar video tanpa crop agar kotak wajah tetap sejajar
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
@@ -761,7 +765,7 @@ function draw(W, H, now) {
   const k = 1 / sc; // 1 px layar dalam satuan video
   const msgs = [], dayOn = dayCfg().on;
   for (const t of tracks) {
-    if (now - t.seen > 700) continue;
+    if (now - t.seen > CFG.TRACK_TTL) continue;
     const d = t.disp || (t.disp = { ...t.box });
     for (const q of ['x', 'y', 'width', 'height']) d[q] += (t.box[q] - d[q]) * 0.4; // gerak halus, tidak berkedip saat deteksi terlewat
     const tiny = t.box.width < W * CFG.MIN_LIVE;
@@ -891,11 +895,19 @@ let oriT = null;
 matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('change', () => { clearTimeout(oriT); oriT = setTimeout(() => { if (ready) { tracks = []; startCamera(); } }, 500); });
 function cameraConstraints(facing, exact = false) {
   const r = RANGES[S.range];
-  return { video: { width: { ideal: isPortrait() ? r.h : r.w }, height: { ideal: isPortrait() ? r.w : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
+  return { video: { width: { ideal: r.w }, height: { ideal: r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
 }
 async function attachCameraStream(stream) {
   video.srcObject = stream; videoEnroll.srcObject = stream;
   await Promise.all([video.play(), videoEnroll.play()]);
+  await Promise.all([video, videoEnroll].map(v => v.videoWidth ? Promise.resolve() : new Promise(resolve => v.addEventListener('loadedmetadata', resolve, { once: true }))));
+}
+async function resetCameraZoom(stream) {
+  const track = stream.getVideoTracks()[0];
+  try {
+    const zoom = track.getCapabilities && track.getCapabilities().zoom;
+    if (zoom) await track.applyConstraints({ advanced: [{ zoom: zoom.min }] });
+  } catch {}
 }
 async function startCamera(facing = cameraFacing, exact = false) {
   const previousFacing = cameraFacing, hadCamera = !!camStream;
@@ -906,8 +918,9 @@ async function startCamera(facing = cameraFacing, exact = false) {
   try {
     stream = await navigator.mediaDevices.getUserMedia(cameraConstraints(facing, exact));
     await attachCameraStream(stream);
+    await resetCameraZoom(stream);
     camStream = stream; cameraFacing = stream.getVideoTracks()[0].getSettings().facingMode || facing; running = true;
-    updateCameraControls(); setStatus('Kamera aktif', 'ok');
+    vw = video.videoWidth; vh = video.videoHeight; tracks = []; updateCameraControls(); setStatus('Kamera aktif', 'ok');
   } catch (err) {
     if (stream) stream.getTracks().forEach(t => t.stop());
     let restored = false;
@@ -915,7 +928,8 @@ async function startCamera(facing = cameraFacing, exact = false) {
       try {
         const fallback = await navigator.mediaDevices.getUserMedia(cameraConstraints(previousFacing));
         await attachCameraStream(fallback);
-        camStream = fallback; cameraFacing = previousFacing; running = true; restored = true;
+        await resetCameraZoom(fallback);
+        camStream = fallback; cameraFacing = previousFacing; running = true; vw = video.videoWidth; vh = video.videoHeight; tracks = []; restored = true;
       } catch (fallbackError) {
         if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
         video.srcObject = null; videoEnroll.srcObject = null;
