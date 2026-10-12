@@ -778,11 +778,14 @@ async function loop() {
 async function handleEnroll(e) {
   e.preventDefault();
   if (!ready) return toast('Model AI belum siap', 'warn');
+  if (!videoEnroll.srcObject) return toast('Kamera pendaftar belum aktif. Muat ulang halaman dan izinkan akses kamera.', 'bad', 5000);
   const id = $('enroll-id').value.trim(), className = $('enroll-class').value.trim(), name = $('enroll-name').value.trim();
   const btn = $('enroll-btn'), hint = $('enroll-hint'), label = btn.innerHTML;
   const prompts = ['Hadap lurus ke kamera', 'Tengok sedikit ke kiri', 'Tengok sedikit ke kanan', 'Hadap lurus & tersenyum', 'Mundur ± 1 meter, hadap lurus'];
   btn.disabled = true; enrolling = true;
   try {
+    await videoEnroll.play();
+    if (!videoEnroll.videoWidth || videoEnroll.readyState < 2) throw new Error('Kamera pendaftar belum siap. Tunggu hingga video tampil, lalu coba lagi.');
     const descs = [];
     for (let i = 0; i < CFG.SAMPLES; i++) {
       let got = null;
@@ -864,7 +867,7 @@ async function startCamera() {
     const r = RANGES[S.range];
     const stream = camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: isPortrait() ? r.h : r.w }, height: { ideal: isPortrait() ? r.w : r.h }, facingMode: 'user' }, audio: false });
     video.srcObject = stream; videoEnroll.srcObject = stream;
-    video.onloadeddata = () => { video.play(); running = true; };
+    await Promise.all([video.play(), videoEnroll.play()]); running = true;
     setStatus('Kamera aktif', 'ok');
   } catch { setStatus('Akses kamera ditolak', 'bad'); toast('Izinkan akses kamera di browser', 'bad', 5000); }
 }
