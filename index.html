@@ -806,10 +806,10 @@ async function handleEnroll(e) {
     if (dup && dup.s.id !== id && !confirm(`Wajah ini mirip dengan ${dup.s.name} (${dup.s.id}). Tetap daftarkan?`)) throw new Error('Pendaftaran dibatalkan.');
 
     btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Menyimpan ke cloud...';
-    F.setDoc(dref('students', skey(id)), { id, name, className, d: F.arrayUnion(...descs.map(pack)), updatedAt: F.serverTimestamp() }, { merge: true }).catch(err => toast('Gagal menyimpan: ' + err.code, 'bad', 5000));
+    await F.setDoc(dref('students', skey(id)), { id, name, className, d: F.arrayUnion(...descs.map(pack)), updatedAt: F.serverTimestamp() }, { merge: true });
     toast(`${name} (${className}) berhasil didaftarkan${navigator.onLine ? '' : ' (offline, dikirim otomatis nanti)'}`); speak('Pendaftaran berhasil');
     $('enroll-form').reset(); renderStudents();
-  } catch (err) { toast(err.message, 'bad', 5000); }
+  } catch (err) { toast(err.code ? `Gagal menyimpan: ${err.code}` : err.message, 'bad', 5000); }
   finally { btn.disabled = false; btn.innerHTML = label; hint.textContent = 'Kamera Pendaftar'; enrolling = false; }
 }
 
@@ -843,12 +843,14 @@ $('enrolled-list').addEventListener('click', e => {
     F.updateDoc(dref('students', skey(id)), { d: [], updatedAt: F.serverTimestamp() }).catch(fail); tracks.forEach(resetTrack); toast('Data wajah direset, silakan rekam ulang', 'warn');
   }
 });
-function saveEdit(e) {
+async function saveEdit(e) {
   e.preventDefault();
   const oid = $('edit-original-id').value, id = $('edit-id').value.trim(), name = $('edit-name').value.trim(), className = $('edit-class').value.trim();
   const s = students.find(x => String(x.id) === oid); if (!s) return;
-  if (id === oid) F.updateDoc(dref('students', skey(oid)), { name, className }).catch(fail);
-  else { const b = F.writeBatch(fdb); b.set(dref('students', skey(id)), { id, name, className, d: s.vecs.map(pack), updatedAt: F.serverTimestamp() }); b.delete(dref('students', skey(oid))); b.commit().catch(fail); }
+  try {
+    if (id === oid) await F.updateDoc(dref('students', skey(oid)), { name, className });
+    else { const b = F.writeBatch(fdb); b.set(dref('students', skey(id)), { id, name, className, d: s.vecs.map(pack), updatedAt: F.serverTimestamp() }); b.delete(dref('students', skey(oid))); await b.commit(); }
+  } catch (err) { return fail(err); }
   $('edit-modal').classList.add('hidden'); tracks.forEach(resetTrack); toast('Data siswa diperbarui');
 }
 
