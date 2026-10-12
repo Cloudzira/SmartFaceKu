@@ -228,7 +228,7 @@ body.fs #site-footer{display:none}
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:.8rem">
           <div><div class="title"><i class="fa-solid fa-user-plus" style="color:#818cf8"></i> Pendaftaran Siswa Baru</div>
-          <p class="sub" style="margin-top:.2rem">Merekam 5 sampel wajah (lurus, kiri, kanan, senyum) agar akurat di berbagai posisi.</p></div>
+          <p class="sub" style="margin-top:.2rem">Merekam 4 sampel wajah (lurus, kiri, kanan, senyum) agar akurat di berbagai posisi.</p></div>
           <button class="btn o" onclick="switchTab('attendance')"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
         </div>
         <div class="enroll">
@@ -296,8 +296,8 @@ const CFG = {
   THRESHOLD: 0.47,   // makin kecil makin ketat (0.4 ketat, 0.55 longgar)
   MARGIN: 0.03,      // selisih minimal dengan kandidat terdekat kedua
   CONFIRM: 3,        // jumlah pengenalan berturut-turut agar sah
-  CONFIRM_FAR: 5, MIN_LIVE: 0.07, MIN_ENROLL: 0.12, MIN_FAR: 0.045, // wajah jauh: konfirmasi lebih banyak; kedip hanya andal bila wajah >= MIN_LIVE
-  SAMPLES: 5,
+  CONFIRM_FAR: 5, MIN_LIVE: 0.07, MIN_ENROLL: 0.12, // kedip hanya andal bila wajah >= MIN_LIVE
+  SAMPLES: 4,
   MIN_FACE: 0.16,    // lebar wajah minimal (rasio lebar video)
   DESC_EVERY: 4,     // verifikasi ulang wajah tiap N frame
   TRACK_TTL: 900     // ms track dipertahankan saat wajah hilang
@@ -638,7 +638,7 @@ async function handleEnroll(e) {
   if (!ready) return toast('Model AI belum siap', 'warn');
   const id = $('enroll-id').value.trim(), className = $('enroll-class').value.trim(), name = $('enroll-name').value.trim();
   const btn = $('enroll-btn'), hint = $('enroll-hint'), label = btn.innerHTML;
-  const prompts = ['Hadap lurus ke kamera', 'Tengok sedikit ke kiri', 'Tengok sedikit ke kanan', 'Hadap lurus & tersenyum', 'Mundur ± 1 meter, hadap lurus'];
+  const prompts = ['Hadap lurus ke kamera', 'Tengok sedikit ke kiri', 'Tengok sedikit ke kanan', 'Hadap lurus & tersenyum'];
   btn.disabled = true; enrolling = true;
   try {
     const descs = [];
@@ -646,20 +646,19 @@ async function handleEnroll(e) {
       let got = null;
       for (let tries = 0; tries < 15 && !got; tries++) {
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${prompts[i]} (${i + 1}/${CFG.SAMPLES})`; hint.textContent = prompts[i];
-        await sleep(tries ? 400 : (i === CFG.SAMPLES - 1 ? 4000 : 1400));
+        await sleep(tries ? 400 : 1400);
         const dets = await fa.detectAllFaces(videoEnroll, detOpts).withFaceLandmarks().withFaceDescriptors();
         if (dets.length !== 1) { hint.textContent = dets.length ? 'Hanya boleh 1 wajah' : 'Wajah tidak terlihat'; continue; }
         const d = dets[0];
-        const bw = d.detection.box.width / videoEnroll.videoWidth, far = i === CFG.SAMPLES - 1;
-        if (d.detection.score < (far ? 0.5 : 0.6) || bw < (far ? CFG.MIN_FAR : CFG.MIN_ENROLL)) { hint.textContent = 'Dekatkan wajah / tambah cahaya'; continue; }
-        if (far && bw > 0.2) { hint.textContent = 'Mundur lagi ± 1 meter'; continue; }
+        const bw = d.detection.box.width / videoEnroll.videoWidth;
+        if (d.detection.score < 0.6 || bw < CFG.MIN_ENROLL) { hint.textContent = 'Dekatkan wajah / tambah cahaya'; continue; }
         got = Array.from(d.descriptor);
       }
       if (!got) throw new Error('Wajah tidak terdeteksi jelas. Perbaiki cahaya & jarak, lalu ulangi.');
       descs.push(got);
     }
     const v0 = Float32Array.from(descs[0]);
-    if (descs.some((d, i) => dist(v0, Float32Array.from(d)) > (i === CFG.SAMPLES - 1 ? 0.65 : 0.55))) throw new Error('Sampel tidak konsisten (mungkin ganti orang). Ulangi pendaftaran.');
+    if (descs.some(d => dist(v0, Float32Array.from(d)) > 0.55)) throw new Error('Sampel tidak konsisten (mungkin ganti orang). Ulangi pendaftaran.');
     const dup = matchFace(v0);
     if (dup && dup.s.id !== id && !confirm(`Wajah ini mirip dengan ${dup.s.name} (${dup.s.id}). Tetap daftarkan?`)) throw new Error('Pendaftaran dibatalkan.');
 
