@@ -34,7 +34,11 @@ main.wide{grid-template-columns:1fr}
 @media(max-width:1000px){main{grid-template-columns:1fr}}
 .vbox{position:relative;background:#000;border-radius:1rem;overflow:hidden;width:100%;aspect-ratio:4/3;max-height:72vh;margin:0 auto;border:1px solid var(--line)}
 .vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.vbox video.rear{transform:none}
 .vbox canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.camera-controls{position:absolute;top:.6rem;right:.6rem;z-index:5;display:flex;gap:.4rem}
+.camera-control{width:38px;height:38px;padding:0;justify-content:center;background:rgba(2,6,23,.75);border-color:rgba(255,255,255,.2);color:#fff}
+.camera-control:disabled{opacity:.45;cursor:not-allowed}
 .hint{position:absolute;bottom:.6rem;left:50%;transform:translateX(-50%);background:rgba(2,6,23,.75);padding:.3rem .8rem;border-radius:.5rem;font-size:.65rem;font-weight:600;color:var(--pri2);text-transform:uppercase;white-space:nowrap}
 .bar{margin-top:.7rem;padding:.7rem 1rem;background:rgba(15,23,42,.8);border:1px solid var(--line);border-radius:.75rem}
 .lbl{font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:700}
@@ -216,6 +220,7 @@ body.fs #site-footer{display:none}
       <div class="vbox">
         <video id="webcam" autoplay muted playsinline></video>
         <canvas id="overlay"></canvas><div class="scan"></div>
+        <div class="camera-controls"><button type="button" class="btn camera-control" data-camera-switch onclick="switchCamera()" aria-label="Ganti kamera" title="Ganti kamera"><i class="fa-solid fa-camera-rotate"></i></button><button type="button" class="btn camera-control" data-torch onclick="toggleTorch()" aria-label="Nyalakan flash" aria-pressed="false" title="Flash tidak didukung kamera ini"><i class="fa-solid fa-bolt"></i></button></div>
         <div class="hint">Hadap kamera • kedipkan mata untuk verifikasi</div>
       </div>
       <div class="bar">
@@ -233,6 +238,7 @@ body.fs #site-footer{display:none}
         </div>
         <div class="enroll">
           <div class="vbox" style="max-height:340px"><video id="webcam-enroll" autoplay muted playsinline></video>
+            <div class="camera-controls"><button type="button" class="btn camera-control" data-camera-switch onclick="switchCamera()" aria-label="Ganti kamera" title="Ganti kamera"><i class="fa-solid fa-camera-rotate"></i></button><button type="button" class="btn camera-control" data-torch onclick="toggleTorch()" aria-label="Nyalakan flash" aria-pressed="false" title="Flash tidak didukung kamera ini"><i class="fa-solid fa-bolt"></i></button></div>
             <div class="hint" id="enroll-hint">Kamera Pendaftar</div></div>
           <form id="enroll-form" onsubmit="handleEnroll(event)" style="display:flex;flex-direction:column;gap:.7rem">
             <div class="grid2">
@@ -318,7 +324,7 @@ const DN = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const defDays = () => DN.map((_, i) => ({ on: i > 0 && i < 6, t: '07:15' }));
 // size = inputSize detektor (kelipatan 32), min = lebar wajah minimal (rasio lebar video), w/h = resolusi kamera
 const RANGES = { near: { size: 256, min: 0.14, w: 1280, h: 720 }, mid: { size: 416, min: 0.07, w: 1280, h: 720 }, far: { size: 608, min: 0.045, w: 1920, h: 1080 } };
-let camStream = null;
+let camStream = null, cameraFacing = 'user', torchOn = false;
 let S = Object.assign({ days: defDays(), liveness: true, voice: true, range: 'mid' }, pj('fc_settings', {}));
 if (!RANGES[S.range]) S.range = 'mid';
 if (!Array.isArray(S.days) || S.days.length !== 7) S.days = defDays();
@@ -348,6 +354,29 @@ function speak(t) {
   const u = new SpeechSynthesisUtterance(t); u.lang = 'id-ID'; speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 function setStatus(txt, cls) { const s = $('system-status'); s.textContent = txt; s.className = 'chip ' + cls; }
+function updateCameraControls() {
+  const track = camStream && camStream.getVideoTracks()[0], torchSupported = !!(track && track.getCapabilities && track.getCapabilities().torch);
+  document.querySelectorAll('[data-camera-switch]').forEach(b => { b.disabled = !track || enrolling; b.title = cameraFacing === 'user' ? 'Gunakan kamera belakang' : 'Gunakan kamera depan'; });
+  document.querySelectorAll('[data-torch]').forEach(b => {
+    b.disabled = !torchSupported; b.classList.toggle('active', torchOn); b.setAttribute('aria-pressed', String(torchOn));
+    b.setAttribute('aria-label', torchOn ? 'Matikan flash' : 'Nyalakan flash'); b.title = torchSupported ? (torchOn ? 'Matikan flash' : 'Nyalakan flash') : 'Flash tidak didukung kamera ini';
+  });
+  [video, videoEnroll].forEach(v => v.classList.toggle('rear', cameraFacing === 'environment'));
+}
+async function switchCamera() {
+  if (enrolling) return toast('Tunggu perekaman wajah selesai sebelum mengganti kamera', 'warn');
+  const facing = cameraFacing === 'user' ? 'environment' : 'user';
+  await startCamera(facing, true);
+}
+async function toggleTorch() {
+  const track = camStream && camStream.getVideoTracks()[0];
+  if (!track || !track.getCapabilities || !track.getCapabilities().torch) return toast('Flash tidak didukung kamera/perangkat ini', 'warn');
+  try {
+    const enabled = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: enabled }] });
+    torchOn = enabled; updateCameraControls();
+  } catch (err) { toast('Tidak dapat mengubah flash: ' + (err.message || 'fitur tidak didukung'), 'warn', 5000); }
+}
 function toggleFS() {
   const b = document.body, el = document.documentElement;
   if (document.fullscreenElement) return document.exitFullscreen();
@@ -717,15 +746,42 @@ function saveEdit(e) {
 const isPortrait = () => matchMedia('(orientation: portrait) and (pointer: coarse)').matches; // HP/tablet potret: kamera ikut potret
 let oriT = null;
 matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('change', () => { clearTimeout(oriT); oriT = setTimeout(() => { if (ready) { tracks = []; startCamera(); } }, 500); });
-async function startCamera() {
+function cameraConstraints(facing, exact = false) {
+  const r = RANGES[S.range];
+  return { video: { width: { ideal: isPortrait() ? r.h : r.w }, height: { ideal: isPortrait() ? r.w : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
+}
+async function attachCameraStream(stream) {
+  video.srcObject = stream; videoEnroll.srcObject = stream;
+  await Promise.all([video.play(), videoEnroll.play()]);
+}
+async function startCamera(facing = cameraFacing, exact = false) {
+  const previousFacing = cameraFacing, hadCamera = !!camStream;
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null; running = false; torchOn = false;
+  video.srcObject = null; videoEnroll.srcObject = null;
+  let stream;
   try {
-    if (camStream) camStream.getTracks().forEach(t => t.stop());
-    const r = RANGES[S.range];
-    const stream = camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: isPortrait() ? r.h : r.w }, height: { ideal: isPortrait() ? r.w : r.h }, facingMode: 'user' }, audio: false });
-    video.srcObject = stream; videoEnroll.srcObject = stream;
-    video.onloadeddata = () => { video.play(); running = true; };
-    setStatus('Kamera aktif', 'ok');
-  } catch { setStatus('Akses kamera ditolak', 'bad'); toast('Izinkan akses kamera di browser', 'bad', 5000); }
+    stream = await navigator.mediaDevices.getUserMedia(cameraConstraints(facing, exact));
+    await attachCameraStream(stream);
+    camStream = stream; cameraFacing = stream.getVideoTracks()[0].getSettings().facingMode || facing; running = true;
+    updateCameraControls(); setStatus('Kamera aktif', 'ok');
+  } catch (err) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    let restored = false;
+    if (hadCamera) {
+      try {
+        const fallback = await navigator.mediaDevices.getUserMedia(cameraConstraints(previousFacing));
+        await attachCameraStream(fallback);
+        camStream = fallback; cameraFacing = previousFacing; running = true; restored = true;
+      } catch (fallbackError) {
+        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null; videoEnroll.srcObject = null;
+      }
+    }
+    updateCameraControls();
+    const message = restored ? 'Kamera pilihan tidak tersedia. Kamera sebelumnya dipulihkan.' : err.name === 'OverconstrainedError' ? 'Kamera yang dipilih tidak tersedia di perangkat ini.' : 'Izinkan akses kamera di browser.';
+    setStatus(restored ? 'Kamera aktif' : 'Kamera gagal diakses', restored ? 'ok' : 'bad'); toast(message, restored ? 'warn' : 'bad', 5000);
+  }
 }
 async function init() {
   chips(); renderLog();
