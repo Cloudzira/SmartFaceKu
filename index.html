@@ -35,6 +35,7 @@ main.wide{grid-template-columns:1fr}
 .vbox{position:relative;background:#000;border-radius:1rem;overflow:hidden;width:100%;aspect-ratio:4/3;max-height:72vh;margin:0 auto;border:1px solid var(--line)}
 .vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 .vbox video.rear{transform:none}
+.vbox img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .vbox canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .scan{z-index:2}
 .vbox canvas{z-index:3}
@@ -227,6 +228,16 @@ body.fs #site-footer{display:none}
     <button class="btn active" style="flex:1;justify-content:center">Masuk</button></div>
   </form></div></div>
 
+<div id="ip-camera-modal" class="modal hidden"><div class="card" style="max-width:390px;width:100%">
+  <h3 style="font-size:.9rem;margin-bottom:.4rem"><i class="fa-solid fa-tower-broadcast"></i> Kamera HP / IP Camera</h3>
+  <p class="sub" style="margin-bottom:.8rem">Pakai aplikasi IP Webcam di HP lain pada Wi-Fi yang sama, lalu masukkan URL snapshot JPEG, misalnya <code>http://192.168.1.20:8080/shot.jpg</code>. Jangan sertakan username atau password.</p>
+  <form onsubmit="connectIpCamera(event)" style="display:flex;flex-direction:column;gap:.7rem">
+    <div><label for="ip-camera-url">URL snapshot kamera</label><input type="url" id="ip-camera-url" required placeholder="http://192.168.1.20:8080/shot.jpg" autocomplete="url"></div>
+    <p class="sub">Kamera harus mengizinkan CORS. Browser dapat memblokir kamera HTTP/LAN dari halaman SmartFace HTTPS; gunakan endpoint HTTPS/CORS atau origin lokal yang diizinkan. RTSP perlu gateway dan tidak bisa dibuka langsung oleh browser.</p>
+    <div class="row"><button type="button" class="btn o" style="flex:1;justify-content:center" onclick="$('ip-camera-modal').classList.add('hidden')">Batal</button><button class="btn active" style="flex:1;justify-content:center"><i class="fa-solid fa-link"></i> Hubungkan</button></div>
+    <button type="button" class="btn d" id="ip-camera-disconnect" onclick="disconnectIpCamera()" style="display:none;justify-content:center"><i class="fa-solid fa-link-slash"></i> Putuskan kamera IP</button>
+  </form></div></div>
+
 <div id="edit-modal" class="modal hidden"><div class="card" style="max-width:340px;width:100%">
   <h3 style="font-size:.9rem;margin-bottom:.8rem"><i class="fa-solid fa-user-pen"></i> Edit Data Siswa</h3>
   <form onsubmit="saveEdit(event)" style="display:flex;flex-direction:column;gap:.7rem">
@@ -253,8 +264,9 @@ body.fs #site-footer{display:none}
       </div>
       <div class="vbox">
         <video id="webcam" autoplay muted playsinline></video>
+        <img id="webcam-ip" class="hidden" alt="Tampilan kamera IP" crossorigin="anonymous">
         <canvas id="overlay"></canvas><div class="scan"></div>
-        <div class="camera-controls"><button type="button" class="btn camera-control" data-camera-switch onclick="switchCamera()" aria-label="Ganti kamera" title="Ganti kamera"><i class="fa-solid fa-camera-rotate"></i></button><button type="button" class="btn camera-control" data-torch onclick="toggleTorch()" aria-label="Nyalakan flash" aria-pressed="false" title="Flash tidak didukung kamera ini"><i class="fa-solid fa-bolt"></i></button></div>
+        <div class="camera-controls"><button type="button" class="btn camera-control" data-camera-switch onclick="switchCamera()" aria-label="Ganti kamera" title="Ganti kamera"><i class="fa-solid fa-camera-rotate"></i></button><button type="button" class="btn camera-control" onclick="openIpCamera()" aria-label="Hubungkan kamera IP" title="Hubungkan kamera IP"><i class="fa-solid fa-tower-broadcast"></i></button><button type="button" class="btn camera-control" data-torch onclick="toggleTorch()" aria-label="Nyalakan flash" aria-pressed="false" title="Flash tidak didukung kamera ini"><i class="fa-solid fa-bolt"></i></button></div>
         <div class="hint">Hadap kamera • kedipkan mata untuk verifikasi</div>
       </div>
       <div class="bar">
@@ -354,8 +366,9 @@ const pj = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } 
 const todayKey = () => new Date().toLocaleDateString('sv-SE');
 const initials = n => String(n).split(' ').filter(Boolean).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
-let fa, detOpts, video = $('webcam'), videoEnroll = $('webcam-enroll'), canvas = $('overlay'), ctx = canvas.getContext('2d');
+let fa, detOpts, video = $('webcam'), videoEnroll = $('webcam-enroll'), ipImage = $('webcam-ip'), cameraSource = video, canvas = $('overlay'), ctx = canvas.getContext('2d');
 let students = [], db = [], tracks = [], trackId = 1, tab = 'attendance', frame = 0, ready = false, enrolling = false;
+let ipCameraActive = false, ipCameraUrl = '', ipFrameVersion = 0, processedIpFrameVersion = 0, ipFrameTimer = null, ipCameraNotified = false, ipCameraErrorNotified = false;
 let enrollPhotoUrl = null;
 $('enroll-photo').addEventListener('change', () => {
   const file = $('enroll-photo').files[0], preview = $('enroll-photo-preview');
@@ -523,19 +536,79 @@ function speak(t) {
 function setStatus(txt, cls) { const s = $('system-status'); s.textContent = txt; s.className = 'chip ' + cls; }
 function updateCameraControls() {
   const track = camStream && camStream.getVideoTracks()[0], torchSupported = !!(track && track.getCapabilities && track.getCapabilities().torch);
-  document.querySelectorAll('[data-camera-switch]').forEach(b => { b.disabled = !track || enrolling; b.title = cameraFacing === 'user' ? 'Gunakan kamera belakang' : 'Gunakan kamera depan'; });
+  document.querySelectorAll('[data-camera-switch]').forEach(b => { b.disabled = !track || enrolling || ipCameraActive; b.title = ipCameraActive ? 'Putuskan kamera IP untuk mengganti kamera lokal' : cameraFacing === 'user' ? 'Gunakan kamera belakang' : 'Gunakan kamera depan'; });
   document.querySelectorAll('[data-torch]').forEach(b => {
-    b.disabled = !torchSupported; b.classList.toggle('active', torchOn); b.setAttribute('aria-pressed', String(torchOn));
+    b.disabled = !torchSupported || ipCameraActive; b.classList.toggle('active', torchOn); b.setAttribute('aria-pressed', String(torchOn));
     b.setAttribute('aria-label', torchOn ? 'Matikan flash' : 'Nyalakan flash'); b.title = torchSupported ? (torchOn ? 'Matikan flash' : 'Nyalakan flash') : 'Flash tidak didukung kamera ini';
   });
   [video, videoEnroll].forEach(v => v.classList.toggle('rear', cameraFacing === 'environment'));
+  $('ip-camera-disconnect').style.display = ipCameraActive ? 'inline-flex' : 'none';
+}
+function openIpCamera() {
+  $('ip-camera-url').value = ipCameraUrl;
+  $('ip-camera-modal').classList.remove('hidden');
+}
+function requestIpCameraFrame() {
+  if (!ipCameraActive) return;
+  const url = new URL(ipCameraUrl);
+  url.searchParams.set('_smartface', Date.now());
+  ipImage.src = url.href;
+}
+function connectIpCamera(e) {
+  e.preventDefault();
+  if (!ready) return toast('Model AI belum siap', 'warn');
+  let url;
+  try {
+    url = new URL($('ip-camera-url').value.trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error();
+    if (url.pathname.endsWith('/')) url.pathname += 'shot.jpg';
+  } catch { return toast('Masukkan URL HTTP/HTTPS yang valid tanpa kredensial', 'warn', 5000); }
+  disconnectIpCamera(false);
+  ipCameraUrl = url.href;
+  ipCameraActive = true; ipCameraNotified = false; ipCameraErrorNotified = false; ipFrameVersion = 0; processedIpFrameVersion = 0;
+  cameraSource = ipImage; video.classList.add('hidden'); ipImage.classList.remove('hidden');
+  ipImage.crossOrigin = 'anonymous';
+  tracks = []; updateFaceCount(0); updateCameraControls();
+  $('ip-camera-modal').classList.add('hidden'); setStatus('Menghubungkan IP Camera...', 'warn');
+  ipImage.onload = () => {
+    if (!ipCameraActive) return;
+    try {
+      const testCanvas = document.createElement('canvas'); testCanvas.width = testCanvas.height = 1;
+      const testContext = testCanvas.getContext('2d'); testContext.drawImage(ipImage, 0, 0, 1, 1); testContext.getImageData(0, 0, 1, 1);
+    } catch {
+      disconnectIpCamera(false); setStatus('Akses IP Camera ditolak', 'bad');
+      return toast('Kamera menolak CORS atau diblokir HTTPS. Periksa pengaturan kamera dan asal halaman.', 'bad', 7000);
+    }
+    ipFrameVersion++; running = true; ipCameraErrorNotified = false; setStatus('IP Camera aktif', 'ok');
+    if (!ipCameraNotified) { toast('IP Camera berhasil terhubung'); ipCameraNotified = true; }
+    clearTimeout(ipFrameTimer); ipFrameTimer = setTimeout(requestIpCameraFrame, 150);
+  };
+  ipImage.onerror = () => {
+    if (!ipCameraActive) return;
+    setStatus('IP Camera tidak dapat diakses', 'bad');
+    if (!ipCameraErrorNotified) { toast('Snapshot gagal dimuat. Periksa URL, Wi-Fi, HTTPS, dan CORS kamera.', 'bad', 7000); ipCameraErrorNotified = true; }
+    clearTimeout(ipFrameTimer); ipFrameTimer = setTimeout(requestIpCameraFrame, 2000);
+  };
+  requestIpCameraFrame();
+}
+function disconnectIpCamera(notify = true) {
+  ipCameraActive = false; clearTimeout(ipFrameTimer); ipFrameTimer = null;
+  ipImage.onload = null; ipImage.onerror = null; ipImage.removeAttribute('src'); ipImage.classList.add('hidden');
+  video.classList.remove('hidden'); cameraSource = video; ipCameraUrl = ''; ipCameraNotified = false;
+  tracks = []; updateFaceCount(0);
+  running = !!(camStream && camStream.getVideoTracks().some(t => t.readyState === 'live'));
+  updateCameraControls();
+  if (running) setStatus('Kamera aktif', 'ok');
+  if (notify) { $('ip-camera-modal').classList.add('hidden'); toast('Kamera IP diputus'); }
 }
 async function switchCamera() {
+  if (ipCameraActive) return toast('Putuskan kamera IP untuk mengganti kamera lokal', 'warn');
   if (enrolling) return toast('Tunggu perekaman wajah selesai sebelum mengganti kamera', 'warn');
   const facing = cameraFacing === 'user' ? 'environment' : 'user';
   await startCamera(facing, true);
 }
 async function toggleTorch() {
+  if (ipCameraActive) return toast('Flash tidak tersedia untuk kamera IP', 'warn');
   const track = camStream && camStream.getVideoTracks()[0];
   if (!track || !track.getCapabilities || !track.getCapabilities().torch) return toast('Flash tidak didukung kamera/perangkat ini', 'warn');
   try {
@@ -756,14 +829,17 @@ function updateTrack(t, d, W) {
 }
 
 async function processFrame() {
-  const W = video.videoWidth, H = video.videoHeight; if (!W) return;
+  const source = cameraSource, isIpFrame = source === ipImage;
+  const W = isIpFrame ? source.naturalWidth : source.videoWidth, H = isIpFrame ? source.naturalHeight : source.videoHeight;
+  if (!W || (isIpFrame && ipFrameVersion === processedIpFrameVersion)) return;
+  if (isIpFrame) processedIpFrameVersion = ipFrameVersion;
   fno++;
   const waitingBlink = S.liveness && tracks.some(t => !t.done && t.hits >= cn(t) && !t.blinked);
   const confirming = tracks.some(t => !t.done && t.hits > 0 && t.hits < cn(t));
   const descriptorEvery = matchMedia('(pointer: coarse)').matches ? 2 : CFG.DESC_EVERY;
   const wantDescriptors = db.length > 0 && (confirming || fno % descriptorEvery === 0);
   const wantLandmarks = wantDescriptors || waitingBlink;
-  let task = fa.detectAllFaces(video, detOpts);
+  let task = fa.detectAllFaces(source, detOpts);
   if (wantLandmarks) task = task.withFaceLandmarks();
   const res = wantDescriptors ? await task.withFaceDescriptors() : await task;
   const now = performance.now(), used = new Set();
@@ -785,7 +861,8 @@ async function processFrame() {
 
 let vw = 0, vh = 0, lastMsg = '';
 function renderLoop() {
-  const width = video.videoWidth || vw, height = video.videoHeight || vh;
+  const width = cameraSource === ipImage ? ipImage.naturalWidth : video.videoWidth || vw;
+  const height = cameraSource === ipImage ? ipImage.naturalHeight : video.videoHeight || vh;
   if (width && height && tab === 'attendance') draw(width, height, performance.now());
   requestAnimationFrame(renderLoop);
 }
@@ -817,7 +894,7 @@ function draw(W, H, now) {
     else if (t.hits > 0) { label = msg = 'Memverifikasi...'; }
     else if (t.unk >= 2) { color = '#ef4444'; label = msg = 'Belum terdaftar'; }
     msgs.push(msg);
-    const { x, y, width: w, height: h } = d, mx = cameraFacing === 'user' ? W - (x + w) : x, cl = Math.min(w, h) * 0.22;
+    const { x, y, width: w, height: h } = d, mx = cameraSource === video && cameraFacing === 'user' ? W - (x + w) : x, cl = Math.min(w, h) * 0.22;
     ctx.strokeStyle = color; ctx.lineWidth = 3 * k; ctx.lineCap = 'round'; ctx.shadowColor = color; ctx.shadowBlur = 10; ctx.beginPath();
     [[mx, y, 1, 1], [mx + w, y, -1, 1], [mx, y + h, 1, -1], [mx + w, y + h, -1, -1]].forEach(([cx, cy, sx, sy]) => { ctx.moveTo(cx + sx * cl, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * cl); });
     ctx.stroke(); ctx.shadowBlur = 0;
@@ -835,7 +912,8 @@ function draw(W, H, now) {
 let running = false, fno = 0;
 async function loop() {
   const t0 = performance.now();
-  if (running && tab === 'attendance' && !enrolling && video.readyState >= 2) {
+  const frameReady = cameraSource === ipImage ? ipImage.complete && ipImage.naturalWidth > 0 : video.readyState >= 2;
+  if (running && tab === 'attendance' && !enrolling && frameReady) {
     try { await processFrame(); } catch (e) { console.error(e); await sleep(200); }
     await sleep(Math.max(0, 50 - (performance.now() - t0))); // sisakan waktu untuk menggambar video
   } else await sleep(150);
