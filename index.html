@@ -36,6 +36,9 @@ main.wide{grid-template-columns:1fr}
 .vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
 .vbox video.rear{transform:none}
 .vbox canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.face-guide{position:absolute;z-index:1;left:50%;top:50%;width:34%;height:76%;transform:translate(-50%,-50%);border:2px solid rgba(34,211,238,.78);border-radius:48% 48% 42% 42%;box-shadow:0 0 18px rgba(34,211,238,.28),inset 0 0 18px rgba(34,211,238,.12);pointer-events:none}
+.scan{z-index:2}
+.vbox canvas{z-index:3}
 .camera-controls{position:absolute;top:.6rem;right:.6rem;z-index:5;display:flex;gap:.4rem}
 .camera-control{width:38px;height:38px;padding:0;justify-content:center;background:rgba(2,6,23,.75);border-color:rgba(255,255,255,.2);color:#fff}
 .camera-control:disabled{opacity:.45;cursor:not-allowed}
@@ -45,6 +48,7 @@ main.wide{grid-template-columns:1fr}
 .title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#cbd5e1;display:flex;align-items:center;gap:.5rem}
 label{display:block;font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:.3rem}
 input[type=text],input[type=password],input[type=time],input[type=search]{width:100%;background:rgba(15,23,42,.9);border:1px solid var(--line);border-radius:.7rem;padding:.6rem .8rem;font-size:.8rem;color:#f8fafc;outline:none}
+input[type=file]{width:100%;background:rgba(15,23,42,.9);border:1px solid var(--line);border-radius:.7rem;padding:.45rem .55rem;font-size:.75rem;color:#f8fafc}
 input:focus{border-color:#6366f1}
 .submit{width:100%;background:linear-gradient(to right,#4f46e5,#7c3aed);color:#fff;border:none;border-radius:.75rem;padding:.75rem;font-weight:700;font-size:.8rem;cursor:pointer}
 .submit:disabled{opacity:.6;cursor:wait}
@@ -155,6 +159,9 @@ body.light .kurnia-icon{color:#475569}
 body.light .kurnia-icon.ig:hover{color:#0891b2}body.light .kurnia-icon.tt:hover{color:#7e22ce}body.light .kurnia-icon.yt:hover{color:#be123c}body.light .kurnia-icon.wa:hover{color:#047857}
 body.fs #site-footer{display:none}
 @media (orientation:portrait) and (pointer:coarse){#tab-attendance .vbox{aspect-ratio:3/4;max-height:70vh}}
+@media (orientation:landscape) and (pointer:coarse){header{padding:.35rem .6rem}header .brand{display:none}header>.row{width:100%;justify-content:center;gap:.35rem}main{padding:.45rem;gap:.45rem}#tab-attendance{padding:.65rem}#tab-attendance .vbox{width:min(100%,92svh);aspect-ratio:16/9;height:auto;min-height:150px;max-height:52svh}#tab-attendance .bar{margin-top:.45rem;padding:.5rem .7rem}#tab-attendance .legend{gap:.5rem;font-size:.62rem}}
+#enroll-photo-preview{display:block;max-width:100%;max-height:180px;margin-top:.5rem;border:1px solid var(--line);border-radius:.6rem;object-fit:contain;background:#000}
+#enroll-photo-preview[hidden]{display:none}
 </style>
 </head>
 <body class="noapp">
@@ -246,7 +253,7 @@ body.fs #site-footer{display:none}
       </div>
       <div class="vbox">
         <video id="webcam" autoplay muted playsinline></video>
-        <canvas id="overlay"></canvas><div class="scan"></div>
+        <canvas id="overlay"></canvas><div class="scan"></div><div class="face-guide" aria-hidden="true"></div>
         <div class="camera-controls"><button type="button" class="btn camera-control" data-camera-switch onclick="switchCamera()" aria-label="Ganti kamera" title="Ganti kamera"><i class="fa-solid fa-camera-rotate"></i></button><button type="button" class="btn camera-control" data-torch onclick="toggleTorch()" aria-label="Nyalakan flash" aria-pressed="false" title="Flash tidak didukung kamera ini"><i class="fa-solid fa-bolt"></i></button></div>
         <div class="hint">Hadap kamera • kedipkan mata untuk verifikasi</div>
       </div>
@@ -260,7 +267,7 @@ body.fs #site-footer{display:none}
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:.8rem">
           <div><div class="title"><i class="fa-solid fa-user-plus" style="color:#818cf8"></i> Pendaftaran Siswa Baru</div>
-          <p class="sub" style="margin-top:.2rem">Merekam 4 sampel wajah (lurus, kiri, kanan, senyum) agar akurat di berbagai posisi.</p></div>
+          <p class="sub" style="margin-top:.2rem">Gunakan kamera untuk merekam 4 sampel, atau unggah satu foto wajah. Sampel kamera lebih akurat di berbagai posisi.</p></div>
           <button class="btn o" onclick="switchTab('attendance')"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
         </div>
         <div class="enroll">
@@ -273,6 +280,7 @@ body.fs #site-footer{display:none}
               <div><label>Kelas</label><input type="text" id="enroll-class" required placeholder="X-A"></div>
             </div>
             <div><label>Nama Lengkap</label><input type="text" id="enroll-name" required placeholder="Kurniapedia"></div>
+            <div><label for="enroll-photo">Foto wajah (opsional)</label><input type="file" id="enroll-photo" accept="image/*" capture="user"><p class="sub" style="margin-top:.3rem">Gunakan foto satu wajah, menghadap kamera, dan cukup terang. Foto diproses di perangkat; hanya data pengenalan wajah yang disimpan.</p><img id="enroll-photo-preview" alt="Pratinjau foto wajah" hidden></div>
             <button type="submit" id="enroll-btn" class="submit"><i class="fa-solid fa-camera-retro"></i> Rekam & Daftarkan</button>
           </form>
         </div>
@@ -348,6 +356,15 @@ const initials = n => String(n).split(' ').filter(Boolean).map(x => x[0]).join('
 
 let fa, detOpts, video = $('webcam'), videoEnroll = $('webcam-enroll'), canvas = $('overlay'), ctx = canvas.getContext('2d');
 let students = [], db = [], tracks = [], trackId = 1, tab = 'attendance', frame = 0, ready = false, enrolling = false;
+let enrollPhotoUrl = null;
+$('enroll-photo').addEventListener('change', () => {
+  const file = $('enroll-photo').files[0], preview = $('enroll-photo-preview');
+  if (enrollPhotoUrl) URL.revokeObjectURL(enrollPhotoUrl);
+  enrollPhotoUrl = null;
+  if (!file) { preview.removeAttribute('src'); preview.hidden = true; return; }
+  if (!file.type.startsWith('image/')) { $('enroll-photo').value = ''; preview.hidden = true; return toast('Pilih berkas foto yang valid', 'warn'); }
+  enrollPhotoUrl = URL.createObjectURL(file); preview.src = enrollPhotoUrl; preview.hidden = false;
+});
 let day = todayKey(), logs = [], recorded = new Set();
 let fpsCount = 0, pendingLog = 0, pendingStu = 0;
 const DN = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -820,29 +837,42 @@ async function loop() {
 async function handleEnroll(e) {
   e.preventDefault();
   if (!ready) return toast('Model AI belum siap', 'warn');
-  if (!videoEnroll.srcObject) return toast('Kamera pendaftar belum aktif. Muat ulang halaman dan izinkan akses kamera.', 'bad', 5000);
+  const photo = $('enroll-photo').files[0];
+  if (!photo && !videoEnroll.srcObject) return toast('Kamera pendaftar belum aktif. Muat ulang halaman dan izinkan akses kamera.', 'bad', 5000);
   const id = $('enroll-id').value.trim(), className = $('enroll-class').value.trim(), name = $('enroll-name').value.trim();
   const btn = $('enroll-btn'), hint = $('enroll-hint'), label = btn.innerHTML;
   const prompts = ['Hadap lurus ke kamera', 'Tengok sedikit ke kiri', 'Tengok sedikit ke kanan', 'Hadap lurus & tersenyum'];
   btn.disabled = true; enrolling = true;
   try {
-    await videoEnroll.play();
-    if (!videoEnroll.videoWidth || videoEnroll.readyState < 2) throw new Error('Kamera pendaftar belum siap. Tunggu hingga video tampil, lalu coba lagi.');
     const descs = [];
-    for (let i = 0; i < CFG.SAMPLES; i++) {
-      let got = null;
-      for (let tries = 0; tries < 15 && !got; tries++) {
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${prompts[i]} (${i + 1}/${CFG.SAMPLES})`; hint.textContent = prompts[i];
-        await sleep(tries ? 400 : 1400);
-        const dets = await fa.detectAllFaces(videoEnroll, detOpts).withFaceLandmarks().withFaceDescriptors();
-        if (dets.length !== 1) { hint.textContent = dets.length ? 'Hanya boleh 1 wajah' : 'Wajah tidak terlihat'; continue; }
-        const d = dets[0];
-        const bw = d.detection.box.width / videoEnroll.videoWidth;
-        if (d.detection.score < 0.6 || bw < CFG.MIN_ENROLL) { hint.textContent = 'Dekatkan wajah / tambah cahaya'; continue; }
-        got = Array.from(d.descriptor);
+    if (photo) {
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Memproses foto wajah...';
+      hint.textContent = 'Memproses foto wajah';
+      const preview = $('enroll-photo-preview');
+      await preview.decode();
+      const dets = await fa.detectAllFaces(preview, detOpts).withFaceLandmarks().withFaceDescriptors();
+      if (dets.length !== 1) throw new Error(dets.length ? 'Foto harus menampilkan tepat satu wajah.' : 'Wajah tidak terdeteksi. Gunakan foto yang lebih jelas dan terang.');
+      const d = dets[0], bw = d.detection.box.width / preview.naturalWidth;
+      if (d.detection.score < 0.6 || bw < CFG.MIN_ENROLL) throw new Error('Wajah terlalu kecil atau kurang jelas. Pilih foto wajah yang lebih dekat dan terang.');
+      descs.push(Array.from(d.descriptor));
+    } else {
+      await videoEnroll.play();
+      if (!videoEnroll.videoWidth || videoEnroll.readyState < 2) throw new Error('Kamera pendaftar belum siap. Tunggu hingga video tampil, lalu coba lagi.');
+      for (let i = 0; i < CFG.SAMPLES; i++) {
+        let got = null;
+        for (let tries = 0; tries < 15 && !got; tries++) {
+          btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${prompts[i]} (${i + 1}/${CFG.SAMPLES})`; hint.textContent = prompts[i];
+          await sleep(tries ? 400 : 1400);
+          const dets = await fa.detectAllFaces(videoEnroll, detOpts).withFaceLandmarks().withFaceDescriptors();
+          if (dets.length !== 1) { hint.textContent = dets.length ? 'Hanya boleh 1 wajah' : 'Wajah tidak terlihat'; continue; }
+          const d = dets[0];
+          const bw = d.detection.box.width / videoEnroll.videoWidth;
+          if (d.detection.score < 0.6 || bw < CFG.MIN_ENROLL) { hint.textContent = 'Dekatkan wajah / tambah cahaya'; continue; }
+          got = Array.from(d.descriptor);
+        }
+        if (!got) throw new Error('Wajah tidak terdeteksi jelas. Perbaiki cahaya & jarak, lalu ulangi.');
+        descs.push(got);
       }
-      if (!got) throw new Error('Wajah tidak terdeteksi jelas. Perbaiki cahaya & jarak, lalu ulangi.');
-      descs.push(got);
     }
     const v0 = Float32Array.from(descs[0]);
     if (descs.some(d => dist(v0, Float32Array.from(d)) > 0.55)) throw new Error('Sampel tidak konsisten (mungkin ganti orang). Ulangi pendaftaran.');
@@ -852,7 +882,10 @@ async function handleEnroll(e) {
     btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Menyimpan ke cloud...';
     await F.setDoc(dref('students', skey(id)), { id, name, className, d: F.arrayUnion(...descs.map(pack)), updatedAt: F.serverTimestamp() }, { merge: true });
     toast(`${name} (${className}) berhasil didaftarkan${navigator.onLine ? '' : ' (offline, dikirim otomatis nanti)'}`); speak('Pendaftaran berhasil');
-    $('enroll-form').reset(); renderStudents();
+    $('enroll-form').reset();
+    if (enrollPhotoUrl) URL.revokeObjectURL(enrollPhotoUrl);
+    enrollPhotoUrl = null; $('enroll-photo-preview').removeAttribute('src'); $('enroll-photo-preview').hidden = true;
+    renderStudents();
   } catch (err) { toast(err.code ? `Gagal menyimpan: ${err.code}` : err.message, 'bad', 5000); }
   finally { btn.disabled = false; btn.innerHTML = label; hint.textContent = 'Kamera Pendaftar'; enrolling = false; }
 }
@@ -905,7 +938,8 @@ matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('ch
 function cameraConstraints(facing, exact = false) {
   const r = RANGES[S.range];
   const mobile = matchMedia('(pointer: coarse)').matches;
-  return { video: { width: { ideal: mobile ? Math.min(r.w, 640) : r.w }, height: { ideal: mobile ? Math.min(r.h, 480) : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
+  const landscape = matchMedia('(orientation: landscape)').matches;
+  return { video: { width: { ideal: mobile ? (landscape ? 640 : 480) : r.w }, height: { ideal: mobile ? (landscape ? 360 : 640) : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
 }
 async function attachCameraStream(stream) {
   video.srcObject = stream; videoEnroll.srcObject = stream;
