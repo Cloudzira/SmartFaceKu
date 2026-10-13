@@ -230,9 +230,9 @@ body.fs #site-footer{display:none}
 
 <div id="ip-camera-modal" class="modal hidden"><div class="card" style="max-width:390px;width:100%">
   <h3 style="font-size:.9rem;margin-bottom:.4rem"><i class="fa-solid fa-tower-broadcast"></i> Kamera HP / IP Camera</h3>
-  <p class="sub" style="margin-bottom:.8rem">Pakai aplikasi IP Webcam di HP lain pada Wi-Fi yang sama, lalu masukkan URL snapshot JPEG, misalnya <code>http://192.168.1.20:8080/shot.jpg</code>. Jangan sertakan username atau password.</p>
+  <p class="sub" style="margin-bottom:.8rem">Pakai snapshot JPEG atau stream MJPEG dari kamera di jaringan yang sama. IP Webcam: <code>http://192.168.1.20:8080/shot.jpg</code>. EZVIZ CS-H1c: <code>http://192.168.1.20/video.mjpg?q=30&amp;fps=33&amp;id=0.5</code> (jalur komunitas, bisa berbeda per firmware). Jangan sertakan kredensial di URL.</p>
   <form onsubmit="connectIpCamera(event)" style="display:flex;flex-direction:column;gap:.7rem">
-    <div><label for="ip-camera-url">URL snapshot kamera</label><input type="url" id="ip-camera-url" required placeholder="http://192.168.1.20:8080/shot.jpg" autocomplete="url"></div>
+    <div><label for="ip-camera-url">URL snapshot / stream MJPEG</label><input type="url" id="ip-camera-url" required placeholder="http://192.168.1.20:8080/shot.jpg" autocomplete="url"></div>
     <p class="sub">Kamera harus mengizinkan CORS. Browser dapat memblokir kamera HTTP/LAN dari halaman SmartFace HTTPS; gunakan endpoint HTTPS/CORS atau origin lokal yang diizinkan. RTSP perlu gateway dan tidak bisa dibuka langsung oleh browser.</p>
     <div class="row"><button type="button" class="btn o" style="flex:1;justify-content:center" onclick="$('ip-camera-modal').classList.add('hidden')">Batal</button><button class="btn active" style="flex:1;justify-content:center"><i class="fa-solid fa-link"></i> Hubungkan</button></div>
     <button type="button" class="btn d" id="ip-camera-disconnect" onclick="disconnectIpCamera()" style="display:none;justify-content:center"><i class="fa-solid fa-link-slash"></i> Putuskan kamera IP</button>
@@ -368,7 +368,7 @@ const initials = n => String(n).split(' ').filter(Boolean).map(x => x[0]).join('
 
 let fa, detOpts, video = $('webcam'), videoEnroll = $('webcam-enroll'), ipImage = $('webcam-ip'), cameraSource = video, canvas = $('overlay'), ctx = canvas.getContext('2d');
 let students = [], db = [], tracks = [], trackId = 1, tab = 'attendance', frame = 0, ready = false, enrolling = false;
-let ipCameraActive = false, ipCameraUrl = '', ipFrameVersion = 0, processedIpFrameVersion = 0, ipFrameTimer = null, ipCameraNotified = false, ipCameraErrorNotified = false;
+let ipCameraActive = false, ipCameraMjpeg = false, ipCameraUrl = '', ipFrameVersion = 0, processedIpFrameVersion = 0, ipFrameTimer = null, ipCameraNotified = false, ipCameraErrorNotified = false;
 let enrollPhotoUrl = null;
 $('enroll-photo').addEventListener('change', () => {
   const file = $('enroll-photo').files[0], preview = $('enroll-photo-preview');
@@ -550,6 +550,7 @@ function openIpCamera() {
 }
 function requestIpCameraFrame() {
   if (!ipCameraActive) return;
+  if (ipCameraMjpeg) { ipImage.src = ipCameraUrl; return; }
   const url = new URL(ipCameraUrl);
   url.searchParams.set('_smartface', Date.now());
   ipImage.src = url.href;
@@ -564,7 +565,7 @@ function connectIpCamera(e) {
     if (url.pathname.endsWith('/')) url.pathname += 'shot.jpg';
   } catch { return toast('Masukkan URL HTTP/HTTPS yang valid tanpa kredensial', 'warn', 5000); }
   disconnectIpCamera(false);
-  ipCameraUrl = url.href;
+  ipCameraUrl = url.href; ipCameraMjpeg = /\.(?:mjpg|mjpeg)$/i.test(url.pathname);
   ipCameraActive = true; ipCameraNotified = false; ipCameraErrorNotified = false; ipFrameVersion = 0; processedIpFrameVersion = 0;
   cameraSource = ipImage; video.classList.add('hidden'); ipImage.classList.remove('hidden');
   ipImage.crossOrigin = 'anonymous';
@@ -581,7 +582,11 @@ function connectIpCamera(e) {
     }
     ipFrameVersion++; running = true; ipCameraErrorNotified = false; setStatus('IP Camera aktif', 'ok');
     if (!ipCameraNotified) { toast('IP Camera berhasil terhubung'); ipCameraNotified = true; }
-    clearTimeout(ipFrameTimer); ipFrameTimer = setTimeout(requestIpCameraFrame, 150);
+    if (ipCameraMjpeg) {
+      if (ipFrameTimer === null) ipFrameTimer = setInterval(() => { if (ipCameraActive && ipImage.complete && ipImage.naturalWidth) ipFrameVersion++; }, 150);
+    } else {
+      clearTimeout(ipFrameTimer); ipFrameTimer = setTimeout(requestIpCameraFrame, 150);
+    }
   };
   ipImage.onerror = () => {
     if (!ipCameraActive) return;
@@ -594,7 +599,7 @@ function connectIpCamera(e) {
 function disconnectIpCamera(notify = true) {
   ipCameraActive = false; clearTimeout(ipFrameTimer); ipFrameTimer = null;
   ipImage.onload = null; ipImage.onerror = null; ipImage.removeAttribute('src'); ipImage.classList.add('hidden');
-  video.classList.remove('hidden'); cameraSource = video; ipCameraUrl = ''; ipCameraNotified = false;
+  video.classList.remove('hidden'); cameraSource = video; ipCameraUrl = ''; ipCameraMjpeg = false; ipCameraNotified = false;
   tracks = []; updateFaceCount(0);
   running = !!(camStream && camStream.getVideoTracks().some(t => t.readyState === 'live'));
   updateCameraControls();
