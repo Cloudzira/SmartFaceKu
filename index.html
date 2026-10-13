@@ -1205,9 +1205,42 @@ async function saveEdit(e) {
 }
 
 /* ---------- Inisialisasi ---------- */
-const isPortrait = () => matchMedia('(orientation: portrait) and (pointer: coarse)').matches; // HP/tablet potret: kamera ikut potret
-let oriT = null;
-matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('change', () => { clearTimeout(oriT); oriT = setTimeout(() => { if (ready) { tracks = []; startCamera(); } }, 500); });
+let cameraBusy = false, cameraAgain = null, cameraDenied = false, recoverCount = 0, oriT = null, lastCT = -1, stall = 0;
+async function getStream(facing, exact) { // percobaan ulang bila kamera baru dilepas & belum siap (umum terjadi di HP saat layar diputar)
+  let err;
+  for (let i = 0; i < 3; i++) {
+    try { return await navigator.mediaDevices.getUserMedia(cameraConstraints(facing, exact)); }
+    catch (e) { err = e; if (!['NotReadableError', 'AbortError', 'TrackStartError'].includes(e.name)) break; await sleep(450 * (i + 1)); }
+  }
+  throw err;
+}
+async function startCamera(facing = cameraFacing, exact = false) { // satu proses pada satu waktu; permintaan baru menunggu giliran
+  if (cameraBusy) { cameraAgain = [facing, exact]; return; }
+  cameraBusy = true;
+  try { await startCameraOnce(facing, exact); }
+  finally { cameraBusy = false; if (cameraAgain) { const a = cameraAgain; cameraAgain = null; await startCamera(a[0], a[1]); } }
+}
+async function recoverCamera(force = false) {
+  if (!ready || !appStarted || ipCameraActive) return;
+  const tr = camStream && camStream.getVideoTracks()[0];
+  const alive = !force && tr && tr.readyState === 'live' && video.srcObject && video.videoWidth > 0;
+  tracks = []; lastMsg = ''; updateFaceCount(0);
+  if (alive) { running = true; vw = video.videoWidth; vh = video.videoHeight; video.play().catch(() => {}); return; } // kamera masih hidup: cukup reset pelacakan, tanpa mematikan kamera
+  setStatus('Memulihkan kamera...', 'warn'); await startCamera();
+}
+const scheduleRecover = () => { clearTimeout(oriT); oriT = setTimeout(() => recoverCamera(false), 600); };
+matchMedia('(orientation: portrait)').addEventListener('change', scheduleRecover);
+window.addEventListener('orientationchange', scheduleRecover);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleRecover(); });
+video.addEventListener('resize', () => { tracks = []; lastMsg = ''; });
+$('system-status').style.cursor = 'pointer'; $('system-status').title = 'Ketuk untuk memuat ulang kamera';
+$('system-status').addEventListener('click', () => { cameraDenied = false; recoverCount = 0; startCamera(); });
+setInterval(() => { // pengawas: bila kamera mati/beku, pulihkan otomatis (maks. 5 kali berturut-turut)
+  if (!ready || !appStarted || ipCameraActive || enrolling || cameraBusy || cameraDenied || tab !== 'attendance' || document.visibilityState !== 'visible') { stall = 0; return; }
+  const tr = camStream && camStream.getVideoTracks()[0], dead = !tr || tr.readyState !== 'live', frozen = video.currentTime === lastCT; lastCT = video.currentTime;
+  stall = (dead || frozen || video.readyState < 2) ? stall + 1 : 0; if (!stall) recoverCount = 0;
+  if (stall >= 3 && recoverCount < 5) { stall = 0; recoverCount++; recoverCamera(true); }
+}, 2000);
 function cameraConstraints(facing, exact = false) {
   const r = RANGES[S.range];
   const mobile = matchMedia('(pointer: coarse)').matches;
@@ -1219,8 +1252,9 @@ function cameraConstraints(facing, exact = false) {
 }
 async function attachCameraStream(stream) {
   video.srcObject = stream; videoEnroll.srcObject = stream;
-  await Promise.all([video.play(), videoEnroll.play()]);
-  await Promise.all([video, videoEnroll].map(v => v.videoWidth ? Promise.resolve() : new Promise(resolve => v.addEventListener('loadedmetadata', resolve, { once: true }))));
+  video.play().catch(() => {}); videoEnroll.play().catch(() => {});
+  if (!video.videoWidth) await new Promise(res => { video.addEventListener('loadedmetadata', res, { once: true }); setTimeout(res, 4000); });
+  if (!video.videoWidth) throw Object.assign(new Error('Video kamera tidak menghasilkan gambar'), { name: 'NotReadableError' });
 }
 async function resetCameraZoom(stream) {
   const track = stream.getVideoTracks()[0];
@@ -1229,14 +1263,14 @@ async function resetCameraZoom(stream) {
     if (zoom) await track.applyConstraints({ advanced: [{ zoom: zoom.min }] });
   } catch {}
 }
-async function startCamera(facing = cameraFacing, exact = false) {
+async function startCameraOnce(facing, exact) {
   const previousFacing = cameraFacing, hadCamera = !!camStream;
   if (camStream) camStream.getTracks().forEach(t => t.stop());
   camStream = null; running = false; torchOn = false; updateFaceCount(0);
   video.srcObject = null; videoEnroll.srcObject = null;
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia(cameraConstraints(facing, exact));
+    stream = await getStream(facing, exact);
     await attachCameraStream(stream);
     await resetCameraZoom(stream);
     camStream = stream; cameraFacing = stream.getVideoTracks()[0].getSettings().facingMode || facing; running = true;
@@ -1246,7 +1280,7 @@ async function startCamera(facing = cameraFacing, exact = false) {
     let restored = false;
     if (hadCamera) {
       try {
-        const fallback = await navigator.mediaDevices.getUserMedia(cameraConstraints(previousFacing));
+        const fallback = await getStream(previousFacing, false);
         await attachCameraStream(fallback);
         await resetCameraZoom(fallback);
         camStream = fallback; cameraFacing = previousFacing; running = true; vw = video.videoWidth; vh = video.videoHeight; tracks = []; restored = true;
@@ -1256,6 +1290,7 @@ async function startCamera(facing = cameraFacing, exact = false) {
       }
     }
     updateCameraControls();
+    cameraDenied = err.name === 'NotAllowedError' || err.name === 'SecurityError';
     const message = restored ? 'Kamera pilihan tidak tersedia. Kamera sebelumnya dipulihkan.' : err.name === 'OverconstrainedError' ? 'Kamera yang dipilih tidak tersedia di perangkat ini.' : 'Izinkan akses kamera di browser.';
     setStatus(restored ? 'Kamera aktif' : 'Kamera gagal diakses', restored ? 'ok' : 'bad'); toast(message, restored ? 'warn' : 'bad', 5000);
   }
