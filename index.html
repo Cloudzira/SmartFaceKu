@@ -33,7 +33,7 @@ main{flex:1;display:grid;grid-template-columns:1fr 360px;gap:1rem;padding:1rem;m
 main.wide{grid-template-columns:1fr}
 @media(max-width:1000px){main{grid-template-columns:1fr}}
 .vbox{position:relative;background:#000;border-radius:1rem;overflow:hidden;width:100%;aspect-ratio:4/3;max-height:72vh;margin:0 auto;border:1px solid var(--line)}
-.vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
+.vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 .vbox video.rear{transform:none}
 .vbox canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .scan{z-index:2}
@@ -158,7 +158,7 @@ body.light .kurnia-icon{color:#475569}
 body.light .kurnia-icon.ig:hover{color:#0891b2}body.light .kurnia-icon.tt:hover{color:#7e22ce}body.light .kurnia-icon.yt:hover{color:#be123c}body.light .kurnia-icon.wa:hover{color:#047857}
 body.fs #site-footer{display:none}
 @media (orientation:portrait) and (pointer:coarse){#tab-attendance .vbox{aspect-ratio:3/4;max-height:70vh}}
-@media (orientation:landscape) and (pointer:coarse){header{padding:.35rem .6rem}header .brand{display:none}header>.row{width:100%;justify-content:center;gap:.35rem}main{padding:.45rem;gap:.45rem}#tab-attendance{padding:.65rem}#tab-attendance .vbox{width:min(100%,92svh);aspect-ratio:16/9;height:auto;min-height:150px;max-height:52svh}#tab-attendance .bar{margin-top:.45rem;padding:.5rem .7rem}#tab-attendance .legend{gap:.5rem;font-size:.62rem}}
+@media (orientation:landscape) and (pointer:coarse){header{padding:.35rem .6rem}header .brand{display:none}header>.row{width:100%;justify-content:center;gap:.35rem}main{padding:.45rem;gap:.45rem}#tab-attendance{padding:.65rem}#tab-attendance .vbox{width:min(100%,112svh);aspect-ratio:16/9;height:auto;min-height:150px;max-height:70svh}#tab-attendance .bar{margin-top:.45rem;padding:.5rem .7rem}#tab-attendance .legend{gap:.5rem;font-size:.62rem}}
 #enroll-photo-preview{display:block;max-width:100%;max-height:180px;margin-top:.5rem;border:1px solid var(--line);border-radius:.6rem;object-fit:contain;background:#000}
 #enroll-photo-preview[hidden]{display:none}
 </style>
@@ -794,7 +794,7 @@ function draw(W, H, now) {
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cw, ch);
-  const sc = Math.min(cw / W, ch / H); ctx.setTransform(sc, 0, 0, sc, (cw - W * sc) / 2, (ch - H * sc) / 2);
+  const sc = Math.max(cw / W, ch / H); ctx.setTransform(sc, 0, 0, sc, (cw - W * sc) / 2, (ch - H * sc) / 2);
   const k = 1 / sc; // 1 px layar dalam satuan video
   const msgs = [], dayOn = dayCfg().on;
   for (const t of tracks) {
