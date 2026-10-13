@@ -609,7 +609,7 @@ $('days-box').addEventListener('change', e => {
 
 function applyRange() {
   const r = RANGES[S.range], mobile = matchMedia('(pointer: coarse)').matches;
-  detOpts = new fa.TinyFaceDetectorOptions({ inputSize: mobile ? Math.min(r.size, 256) : r.size, scoreThreshold: mobile ? 0.3 : 0.4 });
+  detOpts = new fa.TinyFaceDetectorOptions({ inputSize: r.size, scoreThreshold: mobile ? 0.3 : 0.4 });
   CFG.MIN_FACE = r.min;
 }
 $('set-range').addEventListener('change', async () => { S.range = $('set-range').value; saveS(); applyRange(); tracks = []; await startCamera(); toast('Jarak deteksi diubah'); });
@@ -948,7 +948,10 @@ function cameraConstraints(facing, exact = false) {
   const r = RANGES[S.range];
   const mobile = matchMedia('(pointer: coarse)').matches;
   const landscape = matchMedia('(orientation: landscape)').matches;
-  return { video: { width: { ideal: mobile ? (landscape ? 640 : 480) : r.w }, height: { ideal: mobile ? (landscape ? 360 : 640) : r.h }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
+  const farMobile = mobile && S.range === 'far';
+  const width = mobile ? (landscape ? (farMobile ? 1280 : 640) : (farMobile ? 720 : 480)) : r.w;
+  const height = mobile ? (landscape ? (farMobile ? 720 : 360) : (farMobile ? 1280 : 640)) : r.h;
+  return { video: { width: { ideal: width }, height: { ideal: height }, facingMode: exact ? { exact: facing } : { ideal: facing } }, audio: false };
 }
 async function attachCameraStream(stream) {
   video.srcObject = stream; videoEnroll.srcObject = stream;
