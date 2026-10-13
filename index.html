@@ -205,6 +205,7 @@ body.fs #site-footer{display:none}
   <div class="row">
     <span class="chip" id="chip-net">Online</span>
     <span class="chip" id="chip-fps">0 FPS</span>
+    <span class="chip" id="chip-faces" aria-live="polite">0 wajah aktif</span>
     <span class="chip" id="chip-gps">GPS</span>
     <span class="chip" id="chip-db">0 wajah</span>
     <span class="chip hidden" id="chip-q">0 antrean</span>
@@ -511,6 +512,11 @@ function chips() {
   const g = $('chip-gps'); g.textContent = gps ? 'GPS ±' + Math.round(gps.acc) + 'm' : 'GPS off'; g.className = 'chip ' + (gps ? 'ok' : 'bad');
   const pq = pendingLog + pendingStu, q = $('chip-q'); q.className = 'chip warn' + (pq ? '' : ' hidden'); q.textContent = pq + ' antrean';
 }
+function updateFaceCount(count) {
+  const chip = $('chip-faces');
+  chip.textContent = `${count} wajah aktif`;
+  chip.className = 'chip' + (count ? ' ok' : '');
+}
 function speak(t) {
   if (!S.voice || !('speechSynthesis' in window)) return;
   const u = new SpeechSynthesisUtterance(t); u.lang = 'id-ID'; speechSynthesis.cancel(); speechSynthesis.speak(u);
@@ -566,6 +572,7 @@ setInterval(() => { $('chip-fps').textContent = fpsCount + ' FPS'; fpsCount = 0;
 function switchTab(t) {
   tab = t;
   const att = t === 'attendance';
+  if (!att) updateFaceCount(0);
   $('tab-attendance').classList.toggle('hidden', !att);
   const en = $('tab-enrollment'); en.classList.toggle('hidden', att); en.style.display = att ? 'none' : 'flex';
   $('side').style.display = att ? 'flex' : 'none';
@@ -773,6 +780,7 @@ async function processFrame() {
     updateTrack(best, d, W);
   }
   tracks = tracks.filter(t => now - t.seen < CFG.TRACK_TTL);
+  updateFaceCount(tracks.length);
   vw = W; vh = H; fpsCount++;
 }
 
@@ -956,7 +964,7 @@ async function resetCameraZoom(stream) {
 async function startCamera(facing = cameraFacing, exact = false) {
   const previousFacing = cameraFacing, hadCamera = !!camStream;
   if (camStream) camStream.getTracks().forEach(t => t.stop());
-  camStream = null; running = false; torchOn = false;
+  camStream = null; running = false; torchOn = false; updateFaceCount(0);
   video.srcObject = null; videoEnroll.srcObject = null;
   let stream;
   try {
