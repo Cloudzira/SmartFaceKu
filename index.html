@@ -775,7 +775,7 @@ async function processFrame() {
     const miss = best.sf ? fno - best.sf - 1 : 0;
     if (miss >= 1 && miss <= 5 && now - best.seen < 600 && bi > 0.5 && best.box.width >= W * CFG.MIN_LIVE) best.blinked = true;
     used.add(best.id); best.seen = now; best.sf = fno;
-    for (const k of ['x', 'y', 'width', 'height']) best.box[k] += (b[k] - best.box[k]) * 0.6;
+    for (const k of ['x', 'y', 'width', 'height']) best.box[k] += (b[k] - best.box[k]) * 0.8;
     updateTrack(best, d, W);
   }
   tracks = tracks.filter(t => now - t.seen < CFG.TRACK_TTL);
@@ -800,7 +800,7 @@ function draw(W, H, now) {
   for (const t of tracks) {
     if (now - t.seen > CFG.TRACK_TTL) continue;
     const d = t.disp || (t.disp = { ...t.box, updated: now });
-    const alpha = 1 - Math.exp(-Math.min(Math.max(now - d.updated, 0), 80) / 55);
+    const alpha = 1 - Math.exp(-Math.min(Math.max(now - d.updated, 0), 80) / 32);
     for (const q of ['x', 'y', 'width', 'height']) d[q] += (t.box[q] - d[q]) * alpha;
     d.updated = now;
     const tiny = t.box.width < W * CFG.MIN_LIVE;
