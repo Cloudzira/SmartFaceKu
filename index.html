@@ -799,8 +799,10 @@ function draw(W, H, now) {
   const msgs = [], dayOn = dayCfg().on;
   for (const t of tracks) {
     if (now - t.seen > CFG.TRACK_TTL) continue;
-    const d = t.disp || (t.disp = { ...t.box });
-    for (const q of ['x', 'y', 'width', 'height']) d[q] += (t.box[q] - d[q]) * 0.4; // gerak halus, tidak berkedip saat deteksi terlewat
+    const d = t.disp || (t.disp = { ...t.box, updated: now });
+    const alpha = 1 - Math.exp(-Math.min(Math.max(now - d.updated, 0), 80) / 55);
+    for (const q of ['x', 'y', 'width', 'height']) d[q] += (t.box[q] - d[q]) * alpha;
+    d.updated = now;
     const tiny = t.box.width < W * CFG.MIN_LIVE;
     let color = '#22d3ee', label = 'Menganalisis...', msg = label;
     if (!db.length) { color = '#ef4444'; label = msg = 'Database kosong'; }
