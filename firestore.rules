@@ -1,0 +1,140 @@
+rules_version = '2';
+
+// =====================================================================
+//  SmartFaceKu - Firestore Security Rules
+//
+//  Struktur data:
+//    schools/{uid}                       -> pengajuan & status sekolah (1 akun = 1 sekolah)
+//    schools/{uid}/settings/main         -> pengaturan (hari, liveness, suara, hash PIN)
+//    schools/{uid}/students/{nis}        -> data siswa + vektor wajah
+//    schools/{uid}/attendance/{tgl_nis}  -> catatan presensi harian
+//
+//  Prinsip:
+//   - Semua akses wajib login (Google ATAU email+kata sandi) dengan email terverifikasi.
+//   - Sekolah hanya bisa membaca/menulis data miliknya sendiri (uid == id sekolah).
+//   - Data siswa/presensi hanya bisa diakses jika status sekolah = 'approved'
+//     (sekolah yang ditolak/ditangguhkan otomatis terkunci di sisi server).
+//   - Master admin hanya mengelola dokumen sekolah (setujui/tolak/tangguhkan),
+//     TIDAK bisa membaca data wajah & presensi siswa.
+//   - Presensi bersifat sekali tulis: yang sudah tercatat tidak bisa ditimpa.
+//   - Selain yang tertulis di bawah, semua ditolak.
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Fungsi bantu ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Akun Google selalu email_verified = true; akun email+sandi harus klik tautan verifikasi dulu.
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    // UID master admin (sama dengan MASTER_UID di index.html)
+    function isMaster() {
+      return verified() && request.auth.uid == 'f052KArayTV2290T3ljKLpON68v1';
+    }
+
+    function isOwner(sid) {
+      return verified() && request.auth.uid == sid;
+    }
+
+    function schoolApproved(sid) {
+      return exists(/databases/$(database)/documents/schools/$(sid))
+        && get(/databases/$(database)/documents/schools/$(sid)).data.status == 'approved';
+    }
+
+    // Pemilik sekolah yang sudah disetujui master admin
+    function activeOwner(sid) {
+      return isOwner(sid) && schoolApproved(sid);
+    }
+
+    function isStr(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    // ---------- Sekolah ----------
+    match /schools/{sid} {
+
+      // Pemilik membaca dokumen sekolahnya sendiri; master membaca semua (daftar persetujuan).
+      allow get: if isOwner(sid) || isMaster();
+      allow list: if isMaster();
+
+      // Pengajuan sekolah baru: hanya untuk uid sendiri, wajib status 'pending'.
+      allow create: if isOwner(sid)
+        && request.resource.data.keys().hasOnly(['name', 'npsn', 'city', 'email', 'status', 'createdAt'])
+        && request.resource.data.keys().hasAll(['name', 'npsn', 'city', 'email', 'status', 'createdAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.createdAt == request.time
+        && isStr(request.resource.data.name, 150) && request.resource.data.name.size() > 0
+        && isStr(request.resource.data.npsn, 30)  && request.resource.data.npsn.size() > 0
+        && isStr(request.resource.data.city, 100) && request.resource.data.city.size() > 0;
+
+      // Hanya master yang boleh mengubah status, dan hanya field status + reviewedAt.
+      allow update: if isMaster()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
+        && request.resource.data.status in ['pending', 'approved', 'rejected', 'suspended']
+        && request.resource.data.reviewedAt == request.time;
+
+      allow delete: if isMaster();
+
+      // ---------- Pengaturan ----------
+      match /settings/{docId} {
+        allow read: if activeOwner(sid);
+        allow create, update: if activeOwner(sid)
+          && docId == 'main'
+          && request.resource.data.keys().hasOnly(['pin', 'days', 'liveness', 'voice'])
+          && (!('pin' in request.resource.data) || isStr(request.resource.data.pin, 128))
+          && (!('days' in request.resource.data)
+              || (request.resource.data.days is list && request.resource.data.days.size() == 7))
+          && (!('liveness' in request.resource.data) || request.resource.data.liveness is bool)
+          && (!('voice' in request.resource.data) || request.resource.data.voice is bool);
+        allow delete: if false;
+      }
+
+      // ---------- Siswa & data wajah ----------
+      match /students/{nis} {
+        allow read: if activeOwner(sid);
+        allow create, update: if activeOwner(sid)
+          && request.resource.data.keys().hasOnly(['id', 'name', 'className', 'd', 'updatedAt'])
+          && isStr(request.resource.data.name, 150)
+          && isStr(request.resource.data.className, 80)
+          && (!('d' in request.resource.data)
+              || (request.resource.data.d is list && request.resource.data.d.size() <= 100))
+          && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt == request.time);
+        allow delete: if activeOwner(sid);
+      }
+
+      // ---------- Presensi ----------
+      match /attendance/{recId} {
+        allow read: if activeOwner(sid);
+
+        // Sekali tulis: setDoc pada dokumen yang sudah ada dihitung "update" dan ditolak.
+        allow create: if activeOwner(sid)
+          && request.resource.data.keys().hasOnly(['date', 'id', 'name', 'className', 'time', 'status', 'lat', 'lng', 'acc', 'ts'])
+          && request.resource.data.keys().hasAll(['date', 'id', 'name', 'time', 'status', 'ts'])
+          && isStr(request.resource.data.date, 10)
+          && isStr(request.resource.data.id, 60)
+          && isStr(request.resource.data.name, 150)
+          && isStr(request.resource.data.time, 8)
+          && request.resource.data.status in ['Tepat Waktu', 'Terlambat']
+          && request.resource.data.ts == request.time
+          && (request.resource.data.get('className', '') is string);
+
+        allow update: if false;
+
+        // Admin boleh menghapus (fitur reset presensi hari ini).
+        allow delete: if activeOwner(sid);
+      }
+    }
+
+    // ---------- Selain di atas: tolak ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

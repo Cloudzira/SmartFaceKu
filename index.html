@@ -194,6 +194,8 @@ body.light .stats div{background:rgba(14,116,144,.06)}
 <div id="v-auth" class="screen hidden"><div class="card box">
   <div class="brand" style="justify-content:center;margin-bottom:1rem"><div class="logo"><svg viewBox="0 0 512 512" aria-label="SmartFaceKu"><use href="#fc-logo"/></svg></div><div><h1 class="fx">SmartFaceKu</h1><p>Presensi Digital Sekolah</p></div></div>
   <div class="tabs" style="margin-bottom:.9rem"><button class="btn active" id="t-login" style="flex:1;justify-content:center" onclick="authMode('login')">Masuk</button><button class="btn" id="t-reg" style="flex:1;justify-content:center" onclick="authMode('reg')">Daftar Sekolah</button></div>
+  <button type="button" class="btn o" id="g-btn" style="width:100%;justify-content:center;gap:.5rem;margin-bottom:.7rem" onclick="googleLogin()"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Masuk dengan Google</button>
+  <div class="sub" style="text-align:center;margin-bottom:.7rem">atau pakai email</div>
   <form onsubmit="doAuth(event)" style="display:flex;flex-direction:column;gap:.7rem">
     <div><label>Email</label><input type="email" id="a-email" required autocomplete="username"></div>
     <div><label>Kata sandi</label><input type="password" id="a-pass" required minlength="6" autocomplete="current-password"></div>
@@ -439,10 +441,11 @@ async function bootFirebase() {
     F = { ...a, ...au, ...fs };
     const app = F.initializeApp(FBCFG); auth = F.getAuth(app);
     try { fdb = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); } catch { fdb = F.getFirestore(app); }
+    F.getRedirectResult(auth).catch(err => toast(authErr(err), 'bad', 6000));
     F.onAuthStateChanged(auth, onAuth);
   } catch (e) { $('loading-title').textContent = 'Gagal memuat'; $('loading-status').textContent = 'Periksa koneksi internet lalu muat ulang. (' + e.message + ')'; }
 }
-const authErr = e => ({ 'auth/invalid-credential': 'Email atau kata sandi salah', 'auth/email-already-in-use': 'Email sudah terdaftar', 'auth/weak-password': 'Kata sandi minimal 6 karakter', 'auth/invalid-email': 'Format email salah', 'auth/too-many-requests': 'Terlalu banyak percobaan, coba lagi nanti', 'auth/network-request-failed': 'Tidak ada koneksi internet' }[e.code] || e.message);
+const authErr = e => ({ 'auth/invalid-credential': 'Email atau kata sandi salah', 'auth/email-already-in-use': 'Email sudah terdaftar', 'auth/weak-password': 'Kata sandi minimal 6 karakter', 'auth/invalid-email': 'Format email salah', 'auth/too-many-requests': 'Terlalu banyak percobaan, coba lagi nanti', 'auth/network-request-failed': 'Tidak ada koneksi internet', 'auth/account-exists-with-different-credential': 'Email ini sudah terdaftar dengan metode login lain', 'auth/popup-blocked': 'Popup diblokir browser. Izinkan popup lalu coba lagi', 'auth/unauthorized-domain': 'Domain app belum diizinkan di Firebase Console > Authentication > Settings > Authorized domains', 'auth/operation-not-allowed': 'Login Google belum diaktifkan di Firebase Console > Authentication > Sign-in method' }[e.code] || e.message);
 function authMode(m) {
   mode = m; $('t-login').className = 'btn' + (m === 'login' ? ' active' : ''); $('t-reg').className = 'btn' + (m === 'reg' ? ' active' : '');
   $('a-pass2-box').classList.toggle('hidden', m === 'login'); $('a-btn').textContent = m === 'login' ? 'Masuk' : 'Daftar & kirim verifikasi email';
@@ -455,6 +458,17 @@ async function doAuth(e) {
       const c = await F.createUserWithEmailAndPassword(auth, em, pw); await F.sendEmailVerification(c.user);
     } else await F.signInWithEmailAndPassword(auth, em, pw);
   } catch (err) { toast(authErr(err), 'bad', 4500); } finally { $('a-btn').disabled = false; }
+}
+async function googleLogin() {
+  const b = $('g-btn'); b.disabled = true;
+  const p = new F.GoogleAuthProvider(); p.setCustomParameters({ prompt: 'select_account' });
+  try { await F.signInWithPopup(auth, p); }
+  catch (err) {
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(err.code)) {
+      try { await F.signInWithRedirect(auth, p); return; } catch (e2) { err = e2; }   // cadangan untuk browser/PWA yang memblokir popup
+    }
+    if (!['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(err.code)) toast(authErr(err), 'bad', 6000);
+  } finally { b.disabled = false; }
 }
 async function resetPass() {
   const em = $('a-email').value.trim(); if (!em) return toast('Isi email dulu', 'warn');
@@ -694,9 +708,13 @@ async function verifyPin(e) {
   else { toast('PIN salah', 'bad'); $('pin-input').value = ''; }
 }
 async function forgotPin() {
-  const pw = prompt('Masukkan kata sandi akun sekolah (butuh internet):'); if (!pw) return;
-  try { await F.reauthenticateWithCredential(auth.currentUser, F.EmailAuthProvider.credential(user.email, pw)); $('pin-modal').classList.add('hidden'); switchTab('enrollment'); toast('Atur PIN baru di Pengaturan', 'warn'); }
-  catch { toast('Kata sandi salah atau tidak ada internet', 'bad'); }
+  const viaGoogle = user.providerData.some(p => p.providerId === 'google.com');
+  let pw = null; if (!viaGoogle) { pw = prompt('Masukkan kata sandi akun sekolah (butuh internet):'); if (!pw) return; }
+  try {
+    if (viaGoogle) await F.reauthenticateWithPopup(auth.currentUser, new F.GoogleAuthProvider());
+    else await F.reauthenticateWithCredential(auth.currentUser, F.EmailAuthProvider.credential(user.email, pw));
+    $('pin-modal').classList.add('hidden'); switchTab('enrollment'); toast('Atur PIN baru di Pengaturan', 'warn');
+  } catch { toast('Verifikasi gagal atau tidak ada internet', 'bad'); }
 }
 async function setPin() {
   const v = $('set-pin').value.trim(); if (v.length < 4) return toast('PIN minimal 4 karakter', 'warn');
